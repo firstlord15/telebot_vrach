@@ -10,7 +10,8 @@ def create_users_table():
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             full_name TEXT,
-            phone_number TEXT  
+            phone_number TEXT,
+            format_number TEXT
         )
     ''')
 
@@ -26,7 +27,8 @@ def create_super_user_table():
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             full_name TEXT,
-            phone_number TEXT
+            phone_number TEXT,
+            format_number TEXT
         )
     ''')
 
