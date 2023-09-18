@@ -58,7 +58,8 @@ def add_patient_to_database(fullname, age, phone_number):
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                                 fullname TEXT NOT NULL,
                                 age INTEGER,
-                                phone_number TEXT
+                                phone_number TEXT,
+                                Token TEXT
                             );"""
     cursor.execute(create_table_query)
 

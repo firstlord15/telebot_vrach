@@ -1,47 +1,87 @@
-import os
+from datetime import datetime
 from pydrive.drive import GoogleDrive
 from aiogram import Bot, types, Dispatcher
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from config import API_TOKEN
 from auth import authenticate
 
+# Аутентифицируемся и подключаемся к Google Диску
+gauth = authenticate()
+drive = GoogleDrive(gauth)
 
-async def upload_photo_to_drive(photo_path):
-    gauth = authenticate()
 
-    drive = GoogleDrive(gauth)
-    file_metadata = {'title': os.path.basename(photo_path)}
-    media = drive.CreateFile(file_metadata)
-    media.SetContentFile(photo_path)
+def get_folder_id_by_name(folder_name):
+    # Поиск папки по ее названию
+    query = (
+        f"title = '{folder_name}' "
+        f"and mimeType = 'application/vnd.google-apps.folder' "
+        f"and trashed = false"
+    )
+
+    folder_list = drive.ListFile({'q': query}).GetList()
+
+    # Если найдена только одна папка с указанным названием, вернуть ее идентификатор
+    if len(folder_list) == 1:
+        return folder_list[0]['id']
+    # Если найдено несколько папок с указанным названием, вы можете определить необходимую папку способом, наиболее подходящим для ваших потребностей
+    elif len(folder_list) < 1:
+        print("Папка не найдена.")
+
+
+    # print("\n\n\nLEN:", len(folder_list), "\n\n\n")
+    # folder_ids = [folder['title'] for folder in folder_list]
+    # print("\n\n\nLEN:", folder_ids, "\n\n\n")
+
+    return None
+
+
+def create_folder_in_folder(parent_folder_id, folder_name):
+    # Создаем папку внутри указанной папки
+    folder_metadata = {
+        'title': folder_name,
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [{'id': parent_folder_id}]
+    }
+    folder = drive.CreateFile(folder_metadata)
+    folder.Upload()
+    return folder
+
+
+async def upload_photo_to_drive(photo, parent_folder_id, folder_name):
+    # Создаем папку с текущим временем и дополнительными данными
+    current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    folder_name = f'{current_time}_{folder_name}'
+    folder = create_folder_in_folder(parent_folder_id, folder_name)
+
+    # Загружаем фото на Google Диск
+    media = drive.CreateFile({
+        'title': f'{folder_name}.jpg',
+        'mimeType': 'image/jpeg',
+        'parents': [{'id': folder['id']}]
+    })
+    media.SetContentFile(photo)
     media.Upload()
-    print('System: Photo uploaded to Google Drive successfully!')
+    print('System: Фотография успешно загружена на Google Диск!')
     return media
 
 
-async def handle_photo(message: types.Message):
-    photo = message.photo[-1]  # Select the highest quality photo
+# async def handle_photo(parent_folder_id, folder_name, query: types.CallbackQuery):
+#     photo = query.message.photo[-1]  # Выбираем фотографию наивысшего качества
 
-    # Save the photo locally
-    photo_path = f'photos/{photo.file_id}.jpg'
-    await photo.download(photo_path)
+#     # Загружаем фото на Google Диск
+#     media = await upload_photo_to_drive(photo, parent_folder_id, folder_name)
 
-    # Upload the photo to Google Drive
-    media = await upload_photo_to_drive(photo_path)
-
-    # Send a reply confirming the upload
-    await message.reply(f'Your photo has been uploaded to Google Drive!\n'
-                        f'File ID: {media["id"]}')
+#     # Отправляем ответное сообщение об успешной загрузке
+#     await query.message.reply(f'Ваша фотография была загружена на Google Диск!\n'
+#                         f'ID файла: {media["id"]}')
 
 
 if __name__ == '__main__':
-    # Initialize the bot and dispatcher
+    # Инициализируем бота и диспетчер
     bot = Bot(token=API_TOKEN)
     storage = MemoryStorage()
     dp = Dispatcher(bot, storage=storage)
 
-    # Register the photo handler
-    dp.register_message_handler(handle_photo, content_types=types.ContentType.PHOTO)
-
-    # Start the bot
+    # Запускаем бота
     from aiogram import executor
     executor.start_polling(dp, skip_updates=True)

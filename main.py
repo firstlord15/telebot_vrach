@@ -3,6 +3,7 @@ import asyncio
 import time, datetime
 from aiogram.types import ParseMode
 from aiogram.types import MediaGroup
+from pydrive.drive import GoogleDrive
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.markdown import hlink
@@ -12,14 +13,22 @@ from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from database import *
 from config import API_TOKEN
+from auth import authenticate
+from upload_files_for_disk import *
 
 logging.basicConfig(level=logging.INFO)
+
+gauth = authenticate()
+drive = GoogleDrive(gauth)
 
 storage = MemoryStorage()
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot, storage=storage)
 dp.middleware.setup(LoggingMiddleware())
 
+class WaitForPhoto(StatesGroup):
+    waiting = State()
+    
 # Состояния для регистрации пользователя
 class RegistrationStates(StatesGroup):
     fullname = State()
@@ -157,6 +166,7 @@ async def add_patient_handler(message: types.Message):
     # Переходим в состояние регистрации пациента
     await RegisterPatientStates.waiting_for_fullname.set()
 
+
 @dp.message_handler(state=RegisterPatientStates.waiting_for_fullname)
 async def process_full_name(message: types.Message, state: FSMContext):
     if len(message.text.split()) != 3:
@@ -167,6 +177,13 @@ async def process_full_name(message: types.Message, state: FSMContext):
     # Сохраняем ФИО пациента в контексте FSM
     await state.update_data(fullname=message.text)
     await bot.send_message(chat_id=message.chat.id, text='Укажите возраст пациента: (введите только цифру)')
+
+    folder_name = message.text
+    folder_metadata = {'title': folder_name, 'mimeType': 'application/vnd.google-apps.folder'}
+    folder = drive.CreateFile(folder_metadata)
+    folder.Upload()
+
+
     # Переходим в следующее состояние
     await RegisterPatientStates.waiting_for_age.set()
 
@@ -239,10 +256,10 @@ async def create_report_button_handler(callback_query: types.CallbackQuery):
     await show_patient_list(query=callback_query, patients_list=patients_list)
 
 
-
+# from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 @dp.callback_query_handler(lambda c: c.data.startswith("report_patient_"))
-async def process_report_patient_buttons(callback_query: types.CallbackQuery):
+async def process_report_patient_buttons(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.answer()
     patient_id = int(callback_query.data.split("_")[-1])
     patient_data = get_patient_from_database(patient_id)
@@ -251,9 +268,71 @@ async def process_report_patient_buttons(callback_query: types.CallbackQuery):
         await callback_query.message.answer("Не удалось загрузить информацию о пациенте. Пожалуйста, попробуйте еще раз.")
         return
 
-    # Implement the functionality for creating a report for the selected patient
-    report_text = f"Создается отчет для: {patient_data['fullname']}"
-    await callback_query.message.answer(report_text)
+    # Создайте папку для пациента на Google Диске
+    folder_name = patient_data['fullname']
+    parent_folder_id = get_folder_id_by_name(folder_name=folder_name)
+    print("\n\n\nNAME:", folder_name,"\nID:", parent_folder_id,"\n\n")
+
+
+    if parent_folder_id is None:
+        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Папка '{folder_name}' не найдена.")
+        return
+    
+    # Переведите пользователя в состояние ожидания фотографии
+    await WaitForPhoto.waiting.set()
+
+    # Сохраните информацию о папке и пользователях в контексте состояния
+    async with state.proxy() as data:
+        data['parent_folder_id'] = parent_folder_id
+        data['folder_name'] = folder_name
+
+    # # Отправьте сообщение с инструкцией о загрузке фотографии
+    # full_username = get_user_full_name_from_database(user_id=callback_query.from_user.id)
+
+    patients_buttons = [
+        InlineKeyboardButton(text="Готово", callback_data="stop")
+    ]
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(*patients_buttons)
+
+    await bot.send_message(chat_id=callback_query.from_user.id, text="Пожалуйста, загрузите фото и нажмите кнопку 'Готово', когда закончите.", reply_markup=markup)
+
+
+@dp.message_handler(lambda message: message.content_type == 'photo', state=WaitForPhoto.waiting)
+async def handle_uploaded_photo(message: types.Message, state: FSMContext):
+    # Получите фотографию из сообщения
+    if message.photo:
+        print("\n\n\nНачало загрузки\n\n\n")
+        await bot.send_message(chat_id=message.chat.id, text="Начало загрузки")
+        photo = message.photo[-1]
+
+        # Получите текущее состояние пользователя
+        async with state.proxy() as data:
+            parent_folder_id = data['parent_folder_id']
+            folder_name = data['folder_name']
+
+        # Загрузите фотографию на Google Диск
+        media = await upload_photo_to_drive(photo, parent_folder_id, folder_name)
+
+        # Отправьте ответное сообщение об успешной загрузке
+        await message.reply(f'Ваша фотография была загружена на Google Диск!\n'
+                            f'ID файла: {media["id"]}')
+
+        # Верните пользователя в обычное состояние
+        await state.finish()
+    else:
+        await bot.send_message(chat_id=message.chat.id, text="Пожалуйста, загрузите фото перед тем, как нажать кнопку 'Готово'.")
+
+
+
+@dp.callback_query_handler(lambda c: c.data == "stop", state=WaitForPhoto.waiting)
+async def handle_stop_button(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.answer()
+    
+    # Вызываем функцию handle_uploaded_photo для обработки загрузки фотографии
+    await handle_uploaded_photo(callback_query.message, state)
+
 
 
 
