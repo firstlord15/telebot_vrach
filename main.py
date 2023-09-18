@@ -1,6 +1,5 @@
 import logging, re
 import asyncio
-from pydrive.auth import GoogleAuth 
 import time, datetime
 from aiogram.types import ParseMode
 from aiogram.types import MediaGroup
@@ -94,6 +93,11 @@ async def process_registration(callback_query: types.CallbackQuery, state: FSMCo
 # Обработчик указания ФИО
 @dp.message_handler(state=RegistrationStates.fullname)
 async def process_name(message: types.Message, state: FSMContext):
+    if len(message.text.split()) != 3:
+        # Если ФИО введено некорректно, сообщаем об ошибке и ожидаем правильный ввод
+        await bot.send_message(chat_id=message.chat.id, text='Пожалуйста, введите ФИО корректно')
+        return
+    
     async with state.proxy() as data:
         data['full_name'] = message.text
 
@@ -102,13 +106,18 @@ async def process_name(message: types.Message, state: FSMContext):
 
 @dp.message_handler(content_types=types.ContentTypes.TEXT, state=RegistrationStates.phone_number)
 async def process_phone_number(message: types.Message, state: FSMContext):
-    phone_pattern = r"^\+\d{1,3}\d{1,14}$"
-    phone_number = message.text
+    phone_pattern = r"^7\d{10,14}$"
+    phone_number = message.text.strip().replace("+", "")
 
     if not re.match(phone_pattern, phone_number):
-        await message.answer("Пожалуйста, введите правильный номер телефона в формате +7XXXXXXXXXX:")
+        await message.answer("Пожалуйста, введите правильный номер телефона в формате 7XXXXXXXXXX:")
         return
 
+    if not phone_number.isdigit():
+        # Если номер введен некорректно, сообщаем об ошибке и ожидаем правильный ввод
+        await bot.send_message(chat_id=message.chat.id, text='Номер телефона нужно вводить только цифрами. Попробуйте еще раз.')
+        return
+    
     formatted_phone_number = format_phone_number(phone_number)
 
     async with state.proxy() as data:
@@ -173,13 +182,21 @@ async def process_age(message: types.Message, state: FSMContext):
 @dp.message_handler(state=RegisterPatientStates.waiting_for_phone)
 async def process_phone(message: types.Message, state: FSMContext):
     phone_number = message.text.strip().replace("+", "")
+    phone_pattern = r"^7\d{10,14}$"
+
+    if not re.match(phone_pattern, phone_number):
+        await message.answer("Пожалуйста, введите правильный номер телефона в формате 7XXXXXXXXXX:")
+        return
+
+    formatted_phone_number = format_phone_number(phone_number)
+    
     if not phone_number.isdigit():
         # Если номер введен некорректно, сообщаем об ошибке и ожидаем правильный ввод
         await bot.send_message(chat_id=message.chat.id, text='Номер телефона нужно вводить только цифрами. Попробуйте еще раз.')
         return
  
     # Сохраняем номер телефона пациента в контексте FSM
-    await state.update_data(phone_number=phone_number)
+    await state.update_data(phone_number=formatted_phone_number)
  
     data = await state.get_data()
     patient_data = {

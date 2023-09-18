@@ -11,37 +11,18 @@ def create_users_table():
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             full_name TEXT,
-            phone_number TEXT
+            phone_number TEXT,
+            Admin TEXT
         )
     ''')
 
     conn.commit()
     conn.close()
-
-
-def create_super_user_table():
-    conn = sqlite3.connect('database.db')
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS super_users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            full_name TEXT,
-            phone_number TEXT
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
-
 
 def save_user_to_database(user_id, username, full_name, formatted_phone_number):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
-
-    cursor.execute('INSERT INTO users (user_id, username, full_name, phone_number) VALUES (?, ?, ?, ?)',
-                   (user_id, username, full_name, formatted_phone_number))
+    cursor.execute('INSERT INTO users (user_id, username, full_name, phone_number) VALUES (?, ?, ?, ?)', (user_id, username, full_name, formatted_phone_number))
 
     conn.commit()
     conn.close()
@@ -55,7 +36,6 @@ def get_user_full_name_from_database(user_id):
     result = cursor.fetchone()
 
     conn.close()
-
     return result[0] if result else None
 
 
@@ -67,7 +47,6 @@ def user_exists_in_database(user_id):
     result = cursor.fetchone()
 
     conn.close()
-
     return result is not None
 
 def add_patient_to_database(fullname, age, phone_number):
@@ -123,4 +102,3 @@ def get_patient_from_database(patient_id):
 
 if __name__ == '__main__':
     create_users_table()
-    create_super_user_table()
