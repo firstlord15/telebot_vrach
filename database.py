@@ -101,7 +101,7 @@ def get_all_patients_from_database():
     ]
 
     conn.close()
-
+    
     return patients
 
 def get_patient_from_database(patient_id):

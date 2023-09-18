@@ -131,7 +131,7 @@ async def process_main_menu_buttons(callback_query: types.CallbackQuery):
     action = callback_query.data
     
     if action == "create_request":
-        await create_report_button_handler(callback_query.message)
+        await create_report_button_handler(callback_query=callback_query)
     elif action == "add_clients":
         await add_patient_handler(callback_query.message)
     elif action == "edit_data":
@@ -196,7 +196,8 @@ async def process_phone(message: types.Message, state: FSMContext):
     # Возвращаемся в первоначальное состояние
     await show_main_menu_with_buttons(user_id=message.from_user.id, buttons=buttons_list)
 
-async def show_patient_list(callback_query: types.CallbackQuery, patients_list: list):
+
+async def show_patient_list(query: types.CallbackQuery, patients_list: list):
     menu_text = "Выберите пациента для создания отчета:"
     patients_buttons = (
         types.InlineKeyboardButton(text=patient["fullname"], callback_data=f"report_patient_{patient['id']}") 
@@ -206,18 +207,19 @@ async def show_patient_list(callback_query: types.CallbackQuery, patients_list: 
     patient_markup = types.InlineKeyboardMarkup(row_width=1)
     patient_markup.add(*patients_buttons)
 
-    await bot.send_message(chat_id=callback_query.from_user.id, text=menu_text, reply_markup=patient_markup)
+    await bot.send_message(chat_id=query.from_user.id, text=menu_text, reply_markup=patient_markup)
 
 
 async def create_report_button_handler(callback_query: types.CallbackQuery):
     await callback_query.answer('Обработка нажатия кнопки...')
     patients_list = get_all_patients_from_database()
-    
-    if not patients_list:
+
+    if patients_list == []:
         await callback_query.message.answer("Список пациентов пуст.")
         return
 
-    await show_patient_list(callback_query=callback_query.from_user.id, patients_list=patients_list)
+    await show_patient_list(query=callback_query, patients_list=patients_list)
+
 
 
 
