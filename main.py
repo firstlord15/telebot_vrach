@@ -2,7 +2,7 @@ import logging, re
 import asyncio
 import time, datetime
 from aiogram.types import ParseMode
-from aiogram.types import MediaGroup
+from aiogram.types import MediaGroup, ContentType
 from pydrive.drive import GoogleDrive
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.dispatcher import FSMContext
@@ -256,7 +256,7 @@ async def create_report_button_handler(callback_query: types.CallbackQuery):
     await show_patient_list(query=callback_query, patients_list=patients_list)
 
 
-# from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+# ТУТ НАЧИНАТСЯ НАСТОЯЩИЙ УЖАС
 
 @dp.callback_query_handler(lambda c: c.data.startswith("report_patient_"))
 async def process_report_patient_buttons(callback_query: types.CallbackQuery, state: FSMContext):
@@ -271,8 +271,6 @@ async def process_report_patient_buttons(callback_query: types.CallbackQuery, st
     # Создайте папку для пациента на Google Диске
     folder_name = patient_data['fullname']
     parent_folder_id = get_folder_id_by_name(folder_name=folder_name)
-    print("\n\n\nNAME:", folder_name,"\nID:", parent_folder_id,"\n\n")
-
 
     if parent_folder_id is None:
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"Папка '{folder_name}' не найдена.")
@@ -281,13 +279,14 @@ async def process_report_patient_buttons(callback_query: types.CallbackQuery, st
     # Переведите пользователя в состояние ожидания фотографии
     await WaitForPhoto.waiting.set()
 
+    # Отправьте сообщение с инструкцией о загрузке фотографии
+    full_username = get_user_full_name_from_database(user_id=callback_query.from_user.id)
+
     # Сохраните информацию о папке и пользователях в контексте состояния
     async with state.proxy() as data:
         data['parent_folder_id'] = parent_folder_id
         data['folder_name'] = folder_name
-
-    # # Отправьте сообщение с инструкцией о загрузке фотографии
-    # full_username = get_user_full_name_from_database(user_id=callback_query.from_user.id)
+        data['full_username'] = full_username
 
     patients_buttons = [
         InlineKeyboardButton(text="Готово", callback_data="stop")
@@ -299,39 +298,41 @@ async def process_report_patient_buttons(callback_query: types.CallbackQuery, st
     await bot.send_message(chat_id=callback_query.from_user.id, text="Пожалуйста, загрузите фото и нажмите кнопку 'Готово', когда закончите.", reply_markup=markup)
 
 
-@dp.message_handler(lambda message: message.content_type == 'photo', state=WaitForPhoto.waiting)
+@dp.message_handler(lambda message: message.content_type == 'photo', content_types=ContentType.PHOTO, state=WaitForPhoto.waiting)
 async def handle_uploaded_photo(message: types.Message, state: FSMContext):
-    # Получите фотографию из сообщения
-    if message.photo:
-        print("\n\n\nНачало загрузки\n\n\n")
-        await bot.send_message(chat_id=message.chat.id, text="Начало загрузки")
-        photo = message.photo[-1]
-
-        # Получите текущее состояние пользователя
-        async with state.proxy() as data:
-            parent_folder_id = data['parent_folder_id']
-            folder_name = data['folder_name']
-
-        # Загрузите фотографию на Google Диск
-        media = await upload_photo_to_drive(photo, parent_folder_id, folder_name)
-
-        # Отправьте ответное сообщение об успешной загрузке
-        await message.reply(f'Ваша фотография была загружена на Google Диск!\n'
-                            f'ID файла: {media["id"]}')
-
-        # Верните пользователя в обычное состояние
-        await state.finish()
-    else:
-        await bot.send_message(chat_id=message.chat.id, text="Пожалуйста, загрузите фото перед тем, как нажать кнопку 'Готово'.")
-
-
-
-@dp.callback_query_handler(lambda c: c.data == "stop", state=WaitForPhoto.waiting)
-async def handle_stop_button(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.answer()
     
-    # Вызываем функцию handle_uploaded_photo для обработки загрузки фотографии
-    await handle_uploaded_photo(callback_query.message, state)
+    if not message.photo:
+        await bot.send_message(chat_id=message.chat.id, text="Пожалуйста, загрузите фото перед тем, как нажать кнопку 'Готово'.")
+        return
+    
+    await bot.send_message(chat_id=message.chat.id, text="Начало загрузки")
+    folder_name_in_folder_id = create_folder_in_folder(parent_folder_id, folder_name_in_folder)
+    photo = message.photo[-1]
+    
+    # Save the photo locally
+    photo_path = f'photos/{photo.file_id}.jpg'
+    await photo.download(photo_path)
+    
+    # Получите текущее состояние пользователя
+    async with state.proxy() as data:
+        parent_folder_id = data['parent_folder_id']
+        folder_name = data['folder_name']
+        fullname = data['full_username']
+    
+    bot.send_message(chat_id=message.chat.id, text=f"parent_folder_id: {parent_folder_id}\nfolder_name: {folder_name}\nfullname:{fullname}")
+    # Создаем папку с текущим временем и дополнительными данными
+    current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    folder_name_in_folder = f'{current_time}_{fullname}'
+    
+    # Загрузите фотографию на Google Диск
+    media = await upload_photo_to_drive(parent_folder_id=folder_name_in_folder_id['id'], photo_path=photo_path)
+    # Отправьте ответное сообщение об успешной загрузке
+    await message.reply(
+        f'Ваша фотография была загружена на Google Диск!\n'
+        f'ID файла: {media["id"]}'
+    )
+    # Верните пользователя в обычное состояние
+    await state.finish()
 
 
 

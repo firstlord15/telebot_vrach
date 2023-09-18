@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pydrive.drive import GoogleDrive
 from aiogram import Bot, types, Dispatcher
@@ -25,7 +26,7 @@ def get_folder_id_by_name(folder_name):
         return folder_list[0]['id']
     # Если найдено несколько папок с указанным названием, вы можете определить необходимую папку способом, наиболее подходящим для ваших потребностей
     elif len(folder_list) < 1:
-        print("Папка не найдена.")
+        print(f"Папка '{folder_name}' не найдена.")
 
 
     # print("\n\n\nLEN:", len(folder_list), "\n\n\n")
@@ -42,24 +43,23 @@ def create_folder_in_folder(parent_folder_id, folder_name):
         'mimeType': 'application/vnd.google-apps.folder',
         'parents': [{'id': parent_folder_id}]
     }
+
     folder = drive.CreateFile(folder_metadata)
     folder.Upload()
     return folder
 
 
-async def upload_photo_to_drive(photo, parent_folder_id, folder_name):
-    # Создаем папку с текущим временем и дополнительными данными
-    current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    folder_name = f'{current_time}_{folder_name}'
-    folder = create_folder_in_folder(parent_folder_id, folder_name)
+async def upload_photo_to_drive(parent_folder_id, photo_path):
+    drive = GoogleDrive(gauth)
 
-    # Загружаем фото на Google Диск
+    # Создаем файл с расширением .jpg
     media = drive.CreateFile({
-        'title': f'{folder_name}.jpg',
-        'mimeType': 'image/jpeg',
-        'parents': [{'id': folder['id']}]
+        'title': f'{photo_path.split("/")[-1]}.jpg',  # Используйте имя файла с расширением .jpg
+        'mimeType': 'image/jpeg',  # Установите тип MIME для изображений JPEG
+        'parents': [{'id': parent_folder_id}]
     })
-    media.SetContentFile(photo)
+    
+    media.SetContentFile(photo_path)
     media.Upload()
     print('System: Фотография успешно загружена на Google Диск!')
     return media
