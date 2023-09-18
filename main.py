@@ -190,6 +190,8 @@ async def process_phone(message: types.Message, state: FSMContext):
     # Сохраняем данные о пациенте и выводим сообщение об успешной регистрации
     add_patient_to_database(patient_data['fullname'], patient_data['age'], patient_data['phone_number'])
     await bot.send_message(chat_id=message.chat.id, text='Пациент успешно зарегистрирован в системе')
+    await state.finish()
+
 
     # Возвращаемся в первоначальное состояние
     await show_main_menu_with_buttons(user_id=message.from_user.id, buttons=buttons_list)
@@ -204,7 +206,7 @@ async def show_patient_list(callback_query: types.CallbackQuery, patients_list: 
     patient_markup = types.InlineKeyboardMarkup(row_width=1)
     patient_markup.add(*patients_buttons)
 
-    return await bot.send_message(chat_id=callback_query.from_user, text=menu_text, reply_markup=patient_markup)
+    await bot.send_message(chat_id=callback_query.from_user.id, text=menu_text, reply_markup=patient_markup)
 
 
 async def create_report_button_handler(callback_query: types.CallbackQuery):
@@ -215,7 +217,7 @@ async def create_report_button_handler(callback_query: types.CallbackQuery):
         await callback_query.message.answer("Список пациентов пуст.")
         return
 
-    await show_patient_list(user_id=callback_query.from_user.id, patients_list=patients_list)
+    await show_patient_list(callback_query=callback_query.from_user.id, patients_list=patients_list)
 
 
 
@@ -223,10 +225,6 @@ async def create_report_button_handler(callback_query: types.CallbackQuery):
 async def process_report_patient_buttons(callback_query: types.CallbackQuery):
     await callback_query.answer()
     patient_id = int(callback_query.data.split("_")[-1])
-
-    # Retrieve the patient's data from the database using the patient_id
-    # Assuming you have a function get_patient_from_database(patient_id) that returns a dictionary
-    # containing the patient's data with 'id', 'fullname', 'age', and 'phone_number' keys.
     patient_data = get_patient_from_database(patient_id)
 
     if not patient_data:
@@ -238,7 +236,7 @@ async def process_report_patient_buttons(callback_query: types.CallbackQuery):
     await callback_query.message.answer(report_text)
 
 
-#ratmir gay
+
 
 if __name__ == '__main__':
     from aiogram import executor
