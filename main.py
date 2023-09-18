@@ -31,6 +31,11 @@ class EditProfileStates(StatesGroup):
     editing_fullname = State()
     editing_phone_number = State()
 
+class RegisterPatientStates(StatesGroup):
+    waiting_for_age = State()
+    waiting_for_phone = State()
+    waiting_for_fullname = State()
+
 # Функция для форматирования номера телефона
 def format_phone_number(phone_number):
     cleaned_phone_number = re.sub(r'\D', '', phone_number)
@@ -46,7 +51,7 @@ async def cmd_start(message: types.Message):
     # Проверка, существует ли пользователь в базе данных
     if user_exists_in_database(user_id):
         await message.answer(f"Привет, {user.username}! Добро пожаловать обратно!")
-        await show_main_menu_with_buttons(user_id)
+        await show_main_menu_with_buttons(user_id, buttons_list)
     else:
         await RegistrationStates.fullname.set()
         await message.answer("Привет! Хотите указать информацию о себе?",
@@ -54,8 +59,27 @@ async def cmd_start(message: types.Message):
                                 [InlineKeyboardButton("Поделиться контактом", callback_data='reg')]
                             ]))
 
+
+buttons_list = [
+    {"text": "Создать отчет", "callback_data": "create_request"},
+    {"text": "Добавить пациента", "callback_data": "add_clients"},
+    {"text": "Редактировать данные", "callback_data": "edit_data"},
+    {"text": "Настройка подключения API", "callback_data": "setting_API"},
+]
+
+async def show_main_menu_with_buttons(user_id: int, buttons: list):
+    menu_text = "Выберите действие:"
+    menu_buttons = [
+        types.InlineKeyboardButton(text=button["text"], callback_data=button["callback_data"]) for button in buttons
+    ]
+
+    menu_markup = types.InlineKeyboardMarkup(row_width=2)
+    menu_markup.add(*menu_buttons)
+    await bot.send_message(chat_id=user_id, text=menu_text, reply_markup=menu_markup)
+
+
 # Обработчик нажатия кнопки "Поделиться контактом"
-@dp.callback_query_handler(lambda c: c.data == 'reg', state=RegistrationStates)
+@dp.callback_query_handler(lambda c: c.data == 'reg', state=RegistrationStates.fullname)
 async def process_registration(callback_query: types.CallbackQuery, state: FSMContext):
     user = callback_query.from_user
     await callback_query.answer()
@@ -73,37 +97,150 @@ async def process_name(message: types.Message, state: FSMContext):
         data['full_name'] = message.text
 
     await bot.send_message(chat_id=message.from_user.id, text="Укажите ваш номер телефона:")
-    await RegistrationStates.phone_number.set()
+    await RegistrationStates.next()
 
-# Обработчик указания номера телефона
-@dp.message_handler(state=RegistrationStates.phone_number)
+@dp.message_handler(content_types=types.ContentTypes.TEXT, state=RegistrationStates.phone_number)
 async def process_phone_number(message: types.Message, state: FSMContext):
+    phone_pattern = r"^\+\d{1,3}\d{1,14}$"
+    phone_number = message.text
+
+    if not re.match(phone_pattern, phone_number):
+        await message.answer("Пожалуйста, введите правильный номер телефона в формате +XXXXXXXXXXX:")
+        return
+
+    formatted_phone_number = format_phone_number(phone_number)
+
     async with state.proxy() as data:
-        raw_phone_number = message.text
-        data['phone_number'] = raw_phone_number
+        user_id = data['user_id']
+        username = data['username']
+        full_name = data['full_name']
 
-        # Тут форматируется номера телефона из 89096895085
-        # в +7 (909)-689-50-85 с помощью format_phone_number
-        data['format_number'] = format_phone_number(raw_phone_number)
+        save_user_to_database(user_id, username, full_name, formatted_phone_number)
 
+    await message.answer("Спасибо за предоставленную информацию!")
     await state.finish()
 
-# Обработчик нажатия кнопки "yes" для отображения главного меню
-# Еще не настроен и поэтому не вызван
-@dp.callback_query_handler(lambda c: c.data == 'yes')
-async def show_main_menu_with_buttons(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-    keyboard = InlineKeyboardMarkup(row_width=2)
+    # Теперь отобразим главное меню с кнопками
+    buttons_list = ["Создать отчет", "Добавить пациента", "Редактировать данные", "Настройка подключения API"]
+    await show_main_menu_with_buttons(user_id=message.from_user.id, buttons=buttons_list)
 
-    keyboard.add(
-        InlineKeyboardButton("Создать отчет", callback_data="create_request"),
-        InlineKeyboardButton("Добавить пациента", callback_data="add_clients"),
-        InlineKeyboardButton("Редактировать данные", callback_data="edit_data"),
-        InlineKeyboardButton("Настройка подключения API", callback_data="setting_API")
-    )
 
-    await bot.send_message(user_id, "Выберите действие из меню:", reply_markup=keyboard)
+# Обработчик кнопок главного меню    
+@dp.callback_query_handler(lambda c: c.data in {"create_request", "add_clients", "edit_data", "setting_API"})
+async def process_main_menu_buttons(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    action = callback_query.data
+    
+    if action == "create_request":
+        await create_report_button_handler(callback_query.message)
+    elif action == "add_clients":
+        await add_patient_handler(callback_query.message)
+    elif action == "edit_data":
+        await callback_query.message.answer("Раздел 'Редактировать данные' находится в разработке.")
+    elif action == "setting_API":
+        await callback_query.message.answer("Раздел 'Настройка подключения API' находится в разработке.")
+    else:
+        await callback_query.message.answer("Произошла ошибка. Пожалуйста, повторите позже.")
 
+@dp.message_handler(lambda message: message.text == 'Добавить пациента')
+async def add_patient_handler(message: types.Message):
+    await bot.send_message(chat_id=message.chat.id, text='Введите ФИО пациента:')
+    # Переходим в состояние регистрации пациента
+    await RegisterPatientStates.waiting_for_fullname.set()
+
+@dp.message_handler(state=RegisterPatientStates.waiting_for_fullname)
+async def process_full_name(message: types.Message, state: FSMContext):
+    if len(message.text.split()) != 3:
+        # Если ФИО введено некорректно, сообщаем об ошибке и ожидаем правильный ввод
+        await bot.send_message(chat_id=message.chat.id, text='Пожалуйста, введите ФИО пациента корректно')
+        return
+    
+    # Сохраняем ФИО пациента в контексте FSM
+    await state.update_data(fullname=message.text)
+    await bot.send_message(chat_id=message.chat.id, text='Укажите возраст пациента: (введите только цифру)')
+    # Переходим в следующее состояние
+    await RegisterPatientStates.waiting_for_age.set()
+
+@dp.message_handler(state=RegisterPatientStates.waiting_for_age, regexp='^\d+$')
+async def process_age(message: types.Message, state: FSMContext):
+    # Сохраняем возраст пациента в контексте FSM
+    await state.update_data(age=int(message.text))
+    await bot.send_message(chat_id=message.chat.id, text='Введите номер телефона пациента:')
+    # Переходим в следующее состояние
+    await RegisterPatientStates.waiting_for_phone.set()
+ 
+@dp.message_handler(state=RegisterPatientStates.waiting_for_phone)
+async def process_phone(message: types.Message, state: FSMContext):
+    phone_number = message.text.strip().replace("+", "")
+    if not phone_number.isdigit():
+        # Если номер введен некорректно, сообщаем об ошибке и ожидаем правильный ввод
+        await bot.send_message(chat_id=message.chat.id, text='Номер телефона нужно вводить только цифрами. Попробуйте еще раз.')
+        return
+ 
+    # Сохраняем номер телефона пациента в контексте FSM
+    await state.update_data(phone_number=phone_number)
+ 
+    data = await state.get_data()
+    patient_data = {
+        'fullname': data.get('fullname'),
+        'age': data.get('age'),
+        'phone_number': data.get('phone_number')
+    }
+    
+    # Сохраняем данные о пациенте и выводим сообщение об успешной регистрации
+    add_patient_to_database(patient_data['fullname'], patient_data['age'], patient_data['phone_number'])
+    await bot.send_message(chat_id=message.chat.id, text='Пациент успешно зарегистрирован в системе')
+    # Возвращаемся в первоначальное состояние
+    await show_main_menu_with_buttons(user_id=message.from_user.id, buttons=buttons_list)
+
+async def show_patient_list(callback_query: types.CallbackQuery, patients_list: list):
+    menu_text = "Выберите пациента для создания отчета:"
+    patients_buttons = [
+        types.InlineKeyboardButton(text=patient["fullname"], callback_data=f"report_patient_{patient['id']}") 
+        for patient in patients_list
+    ]
+
+    patient_markup = types.InlineKeyboardMarkup(row_width=1)
+    patient_markup.add(*patients_buttons)
+
+    return await bot.send_message(chat_id=callback_query.from_user, text=menu_text, reply_markup=patient_markup)
+
+
+async def create_report_button_handler(callback_query: types.CallbackQuery):
+    await callback_query.answer('Обработка нажатия кнопки...')
+    
+    # Assuming you have a get_all_patients_from_database() function that returns a list of dictionaries
+    # containing patient data with 'id', 'fullname', 'age', and 'phone_number' keys.
+    patients_list = get_all_patients_from_database()
+    
+    if not patients_list:
+        await callback_query.message.answer("Список пациентов пуст.")
+        return
+
+    await show_patient_list(user_id=callback_query.from_user.id, patients_list=patients_list)
+
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("report_patient_"))
+async def process_report_patient_buttons(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    patient_id = int(callback_query.data.split("_")[-1])
+
+    # Retrieve the patient's data from the database using the patient_id
+    # Assuming you have a function get_patient_from_database(patient_id) that returns a dictionary
+    # containing the patient's data with 'id', 'fullname', 'age', and 'phone_number' keys.
+    patient_data = get_patient_from_database(patient_id)
+
+    if not patient_data:
+        await callback_query.message.answer("Не удалось загрузить информацию о пациенте. Пожалуйста, попробуйте еще раз.")
+        return
+
+    # Implement the functionality for creating a report for the selected patient
+    report_text = f"Создается отчет для: {patient_data['fullname']}"
+    await callback_query.message.answer(report_text)
+
+
+#ratmir gay
 
 if __name__ == '__main__':
     from aiogram import executor
