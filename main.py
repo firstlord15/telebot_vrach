@@ -39,7 +39,7 @@ class RegisterPatientStates(StatesGroup):
 # Функция для форматирования номера телефона
 def format_phone_number(phone_number):
     cleaned_phone_number = re.sub(r'\D', '', phone_number)
-    formatted_phone_number = f"+7 ({cleaned_phone_number[:3]})-{cleaned_phone_number[3:6]}-{cleaned_phone_number[6:8]}-{cleaned_phone_number[8:]}"
+    formatted_phone_number = f"+7 ({cleaned_phone_number[1:4]})-{cleaned_phone_number[4:7]}-{cleaned_phone_number[7:9]}-{cleaned_phone_number[9:]}"
     return formatted_phone_number
 
 # Обработчик команды /start или /menu
@@ -105,7 +105,7 @@ async def process_phone_number(message: types.Message, state: FSMContext):
     phone_number = message.text
 
     if not re.match(phone_pattern, phone_number):
-        await message.answer("Пожалуйста, введите правильный номер телефона в формате +XXXXXXXXXXX:")
+        await message.answer("Пожалуйста, введите правильный номер телефона в формате +7XXXXXXXXXX:")
         return
 
     formatted_phone_number = format_phone_number(phone_number)
@@ -121,7 +121,6 @@ async def process_phone_number(message: types.Message, state: FSMContext):
     await state.finish()
 
     # Теперь отобразим главное меню с кнопками
-    buttons_list = ["Создать отчет", "Добавить пациента", "Редактировать данные", "Настройка подключения API"]
     await show_main_menu_with_buttons(user_id=message.from_user.id, buttons=buttons_list)
 
 
@@ -166,6 +165,7 @@ async def process_age(message: types.Message, state: FSMContext):
     # Сохраняем возраст пациента в контексте FSM
     await state.update_data(age=int(message.text))
     await bot.send_message(chat_id=message.chat.id, text='Введите номер телефона пациента:')
+
     # Переходим в следующее состояние
     await RegisterPatientStates.waiting_for_phone.set()
  
@@ -190,15 +190,16 @@ async def process_phone(message: types.Message, state: FSMContext):
     # Сохраняем данные о пациенте и выводим сообщение об успешной регистрации
     add_patient_to_database(patient_data['fullname'], patient_data['age'], patient_data['phone_number'])
     await bot.send_message(chat_id=message.chat.id, text='Пациент успешно зарегистрирован в системе')
+
     # Возвращаемся в первоначальное состояние
     await show_main_menu_with_buttons(user_id=message.from_user.id, buttons=buttons_list)
 
 async def show_patient_list(callback_query: types.CallbackQuery, patients_list: list):
     menu_text = "Выберите пациента для создания отчета:"
-    patients_buttons = [
+    patients_buttons = (
         types.InlineKeyboardButton(text=patient["fullname"], callback_data=f"report_patient_{patient['id']}") 
         for patient in patients_list
-    ]
+    )
 
     patient_markup = types.InlineKeyboardMarkup(row_width=1)
     patient_markup.add(*patients_buttons)
@@ -208,9 +209,6 @@ async def show_patient_list(callback_query: types.CallbackQuery, patients_list: 
 
 async def create_report_button_handler(callback_query: types.CallbackQuery):
     await callback_query.answer('Обработка нажатия кнопки...')
-    
-    # Assuming you have a get_all_patients_from_database() function that returns a list of dictionaries
-    # containing patient data with 'id', 'fullname', 'age', and 'phone_number' keys.
     patients_list = get_all_patients_from_database()
     
     if not patients_list:
