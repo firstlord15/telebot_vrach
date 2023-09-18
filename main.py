@@ -1,5 +1,6 @@
 import logging, re
 import asyncio
+from pydrive.auth import GoogleAuth 
 import time, datetime
 from aiogram.types import ParseMode
 from aiogram.types import MediaGroup
