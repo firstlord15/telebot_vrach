@@ -64,16 +64,16 @@ async def upload_photo_to_drive(parent_folder_id, photo_path):
     print('System: Фотография успешно загружена на Google Диск!')
     return media
 
+async def get_link(media):
+    # Получаем объект файла на основе id из media
+    file_id = media['id']
+    file = drive.CreateFile({'id': file_id})
 
-# async def handle_photo(parent_folder_id, folder_name, query: types.CallbackQuery):
-#     photo = query.message.photo[-1]  # Выбираем фотографию наивысшего качества
-
-#     # Загружаем фото на Google Диск
-#     media = await upload_photo_to_drive(photo, parent_folder_id, folder_name)
-
-#     # Отправляем ответное сообщение об успешной загрузке
-#     await query.message.reply(f'Ваша фотография была загружена на Google Диск!\n'
-#                         f'ID файла: {media["id"]}')
+    # Получаем ссылку на файл
+    file.GetContentFile('temp.jpg')  # Скачиваем файл временно
+    file_link = file['alternateLink']  # Получаем альтернативную ссылку на файл
+    
+    return file_link
 
 
 if __name__ == '__main__':

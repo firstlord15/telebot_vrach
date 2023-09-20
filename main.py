@@ -288,54 +288,66 @@ async def process_report_patient_buttons(callback_query: types.CallbackQuery, st
         data['folder_name'] = folder_name
         data['full_username'] = full_username
 
-    patients_buttons = [
-        InlineKeyboardButton(text="Готово", callback_data="stop")
-    ]
-
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(*patients_buttons)
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(InlineKeyboardButton(text="Готово", callback_data="ready"))
 
     await bot.send_message(chat_id=callback_query.from_user.id, text="Пожалуйста, загрузите фото и нажмите кнопку 'Готово', когда закончите.", reply_markup=markup)
 
 
-@dp.message_handler(lambda message: message.content_type == 'photo', content_types=ContentType.PHOTO, state=WaitForPhoto.waiting)
-async def handle_uploaded_photo(message: types.Message, state: FSMContext):
-    
-    if not message.photo:
-        await bot.send_message(chat_id=message.chat.id, text="Пожалуйста, загрузите фото перед тем, как нажать кнопку 'Готово'.")
+@dp.message_handler(content_types=ContentType.ANY, state=WaitForPhoto.waiting)
+async def handle_uploaded_photo(message: types.Message, state: FSMContext):    
+    # Определите, является ли фотография сжатой или оригинальной
+    if message.photo == [] and message.document.mime_type.startswith('image'):
+        photo = message.document
+        photo_path = f'photos/{photo.file_id}.jpg'
+    elif message.photo != []:
+        photo = message.photo[-1]
+        photo_path = f'photos/compressed_{photo.file_id}.jpg'
+    else:
+        # Если это не фотография и не изображение, игнорируем этот файл
+        await bot.send_message(chat_id=message.chat.id, text="Пожалуйста, отправьте только фотографию!")
         return
     
-    await bot.send_message(chat_id=message.chat.id, text="Начало загрузки")
-    folder_name_in_folder_id = create_folder_in_folder(parent_folder_id, folder_name_in_folder)
-    photo = message.photo[-1]
-    
-    # Save the photo locally
-    photo_path = f'photos/{photo.file_id}.jpg'
-    await photo.download(photo_path)
-    
-    # Получите текущее состояние пользователя
+    # Получить текущее состояние пользователя
     async with state.proxy() as data:
         parent_folder_id = data['parent_folder_id']
-        folder_name = data['folder_name']
         fullname = data['full_username']
-    
-    bot.send_message(chat_id=message.chat.id, text=f"parent_folder_id: {parent_folder_id}\nfolder_name: {folder_name}\nfullname:{fullname}")
-    # Создаем папку с текущим временем и дополнительными данными
-    current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    folder_name_in_folder = f'{current_time}_{fullname}'
-    
+
+        if 'new_folder_id' not in data:
+            # Создать папку с текущим временем и дополнительными данными
+            current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            new_folder_name = f'{current_time}_{fullname}'
+            
+            # Создать папку с новым именем в родительской папке
+            folder_name_in_folder_id = create_folder_in_folder(parent_folder_id, new_folder_name)
+            
+            # Сохранить идентификатор папки в состоянии
+            data['new_folder_id'] = folder_name_in_folder_id['id']
+        else:
+            folder_name_in_folder_id = {'id': data['new_folder_id']}
+
+    # Скачиваем фото локально
+    await bot.send_message(chat_id=message.chat.id, text="Начало загрузки")
+    await photo.download(photo_path)
+
     # Загрузите фотографию на Google Диск
     media = await upload_photo_to_drive(parent_folder_id=folder_name_in_folder_id['id'], photo_path=photo_path)
+
+    # создаем прямую ссылку фото
+    file_link = await get_link(media)
+
     # Отправьте ответное сообщение об успешной загрузке
     await message.reply(
         f'Ваша фотография была загружена на Google Диск!\n'
-        f'ID файла: {media["id"]}'
+        f'Ссылка на файл: {file_link}'
     )
-    # Верните пользователя в обычное состояние
+    
+    
+@dp.callback_query_handler(lambda c: c.data == 'ready', state=WaitForPhoto.waiting)
+async def handle_stop_message(query: types.CallbackQuery, state: FSMContext):
+    chat_id = query.from_user.id
     await state.finish()
-
-
-
+    await show_main_menu_with_buttons(user_id=chat_id, buttons=buttons_list)
 
 
 if __name__ == '__main__':

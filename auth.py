@@ -26,3 +26,6 @@ def authenticate():
 
     gauth.SaveCredentialsFile('token.json')
     return gauth
+
+if __name__ == "__main__":
+    authenticate()
