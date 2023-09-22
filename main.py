@@ -335,32 +335,13 @@ async def process_report_patient_buttons(callback_query: types.CallbackQuery, st
 async def DateForFolderName(message: types.Message):
     await message.answer("Выберите метод задания даты:", reply_markup=markup_date_choice)
     
-    
-from aiogram.dispatcher import FSMContext
-from aiogram.types import ContentType, InputFile
 
-# ...
 
 @dp.message_handler(lambda message: message.text == "Ручной ввод даты", state="*")
 async def DateForFolderName_manual(message: types.Message, state: FSMContext):
     await bot.send_message(chat_id=message.chat.id, text="Введите дату в формате DD.MM.YYYY")
 
-    # Устанавливаем состояние ожидания вручную вводимой даты
-    await WaitForPhoto.waiting_date_manual.set()
-
-@dp.callback_query_handler(lambda message: message.text == "Автоматическая дата", state="*")
-async def DateForFolderName_auto(callback_query: types.CallbackQuery, state: FSMContext):
-    await bot.send_message(chat_id=callback_query.message.chat.id, text="Вы выбрали автоматическую дату")
-    async with state.proxy() as data:
-        data["status"] = False
-
-    # Устанавливаем состояние ожидания автоматически вводимой даты
-    await WaitForPhoto.waiting_date_auto.set()
-
-@dp.callback_query_handler(state=WaitForPhoto.waiting_date_manual)
-async def handle_manual_date(callback_query: types.CallbackQuery, state: FSMContext):
-    await bot.send_message(chat_id=callback_query.message.chat.id, text="test1")
-    current_time = callback_query.message.text.strip()  # Получаем текст сообщения
+    current_time = message.text.strip()  # Получаем текст сообщения
 
     async with state.proxy() as data:
         data["current_time"] = current_time
@@ -369,15 +350,15 @@ async def handle_manual_date(callback_query: types.CallbackQuery, state: FSMCont
     await state.finish()
     await WaitForPhoto.waiting.set()
 
-@dp.message_handler(state=WaitForPhoto.waiting_date_auto)
-async def handle_auto_date(message: types.Message, state: FSMContext):
-    await bot.send_message(chat_id=message.chat.id, text="test2")
-    # Обработка автоматической даты
+@dp.callback_query_handler(lambda message: message.text == "Автоматическая дата", state="*")
+async def DateForFolderName_auto(callback_query: types.CallbackQuery, state: FSMContext):
     async with state.proxy() as data:
         data["status"] = False
     
     await state.finish()
     await WaitForPhoto.waiting.set()
+
+    
 
 
 
