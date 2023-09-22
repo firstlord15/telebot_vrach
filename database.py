@@ -49,7 +49,7 @@ def user_exists_in_database(user_id):
     conn.close()
     return result is not None
 
-def add_patient_to_database(fullname, age, phone_number):
+def add_patient_to_database(fullname, age, phone_number, token):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
 
@@ -59,13 +59,13 @@ def add_patient_to_database(fullname, age, phone_number):
                                 fullname TEXT NOT NULL,
                                 age INTEGER,
                                 phone_number TEXT,
-                                Token TEXT
+                                token TEXT
                             );"""
     cursor.execute(create_table_query)
 
     # Вставка данных пациента в таблицу
-    cursor.execute('INSERT INTO patients (fullname, age, phone_number) VALUES (?, ?, ?)',
-                   (fullname, age, phone_number))
+    cursor.execute('INSERT INTO patients (fullname, age, phone_number, token) VALUES (?, ?, ?, ?)',
+                   (fullname, age, phone_number, token))
 
     conn.commit()
     conn.close()

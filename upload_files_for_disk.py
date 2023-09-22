@@ -70,7 +70,6 @@ async def get_link(media):
     file = drive.CreateFile({'id': file_id})
 
     # Получаем ссылку на файл
-    file.GetContentFile('temp.jpg')  # Скачиваем файл временно
     file_link = file['alternateLink']  # Получаем альтернативную ссылку на файл
     
     return file_link
@@ -85,3 +84,4 @@ if __name__ == '__main__':
     # Запускаем бота
     from aiogram import executor
     executor.start_polling(dp, skip_updates=True)
+
