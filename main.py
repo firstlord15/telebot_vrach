@@ -1,6 +1,7 @@
 import logging, re, os
 import asyncio
 import time, datetime
+from aiogram import executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.types import ContentType
 from pydrive.drive import GoogleDrive
@@ -32,6 +33,11 @@ class WaitForPhoto(StatesGroup):
     waiting_date_manual = State()
     waiting_date_auto = State()
 
+class CreateReportStates(StatesGroup):
+    waiting_for_date_choice = State()
+    waiting_for_patient_choice = State()
+    waiting_for_photo = State()
+    waiting_date_manual = State()
 
 # Состояния для регистрации пользователя
 class RegistrationStates(StatesGroup):
@@ -175,7 +181,7 @@ async def process_phone_number(message: types.Message, state: FSMContext):
 async def process_main_menu_buttons(message: types.Message):
     action = message.text
     if action == "Создать отчет":
-        await DateForFolderName(message)
+        await create_report_handler(message)
     elif action == "Добавить пациента":
         await add_patient_handler(message)
     elif action == "Редактировать данные":
@@ -294,11 +300,124 @@ async def create_report_button_handler(message: types.Message):
     await show_patient_list(message, patients_list)
 
 
-@dp.callback_query_handler(lambda c: c.data.startswith("report_patient_"))
+# @dp.callback_query_handler(lambda c: c.data.startswith("report_patient_"))
+# async def process_report_patient_buttons(callback_query: types.CallbackQuery, state: FSMContext):
+#     await callback_query.answer()
+#     patient_id = int(callback_query.data.split("_")[-1])
+#     patient_data = get_patient_from_database(patient_id)
+
+#     if not patient_data:
+#         await callback_query.message.answer(
+#             "Не удалось загрузить информацию о пациенте. Пожалуйста, попробуйте еще раз.")
+#         return
+
+#     # Создайте папку для пациента на Google Диске
+#     folder_name = patient_data['fullname']
+#     parent_folder_id = get_folder_id_by_name(folder_name=folder_name)
+
+#     if parent_folder_id is None:
+#         await bot.send_message(chat_id=callback_query.from_user.id, text=f"Папка '{folder_name}' не найдена.")
+#         return
+
+#     # Переведите пользователя в состояние ожидания фотографии
+#     await CreateReportStates.waiting_for_photo.set()
+
+#     # Отправьте сообщение с инструкцией о загрузке фотографии
+#     full_username = get_user_full_name_from_database(user_id=callback_query.from_user.id)
+
+#     # Сохраните информацию о папке и пользователях в контексте состояния
+#     async with state.proxy() as data:
+#         data['parent_folder_id'] = parent_folder_id
+#         data['folder_name'] = folder_name
+#         data['full_username'] = full_username
+
+#     menu_text = 'Пожалуйста, загрузите фото и нажмите кнопку *Готово*, когда закончите.'
+
+#     ready_button = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+#     ready_button.add(types.KeyboardButton(text="Готово"))
+#     await bot.send_message(chat_id=callback_query.from_user.id, text=menu_text, reply_markup=ready_button)
+
+
+
+@dp.message_handler(lambda message: message.text == "Создать отчет")
+async def create_report_handler(message: types.Message):
+    await message.answer("Выберите способ ввода даты:", reply_markup=markup_date_choice)
+    await CreateReportStates.waiting_for_date_choice.set()
+
+
+async def create_report_auto_date(message: types.Message, state: FSMContext):
+    # Получение текущей даты
+    current_date = datetime.now().strftime("%d.%m.%Y")
+
+    # Сохранение даты в контексте состояния
+    async with state.proxy() as data:
+        data['report_date'] = current_date
+
+
+    # Отправка сообщения с текущей датой и запросом выбора пациента
+    await message.answer(f"Автоматически определена дата отчета: {current_date}\n"
+                         "Выберите пациента для создания отчета:",
+                         reply_markup=types.ReplyKeyboardRemove())
+
+    # Переход к ожиданию выбора пациента
+    await select_patient_for_report(message)
+
+
+@dp.message_handler(lambda message: message.text in ["Автоматическая дата", "Ручной ввод даты"], state=CreateReportStates.waiting_for_date_choice)
+async def process_date_choice(message: types.Message, state: FSMContext):
+    if message.text == "Автоматическая дата":
+        # Логика для автоматического выбора даты
+        await create_report_auto_date(message, state)
+
+    elif message.text == "Ручной ввод даты":
+        # Логика для ручного ввода даты
+        await message.answer("Введите дату отчета в формате ДД.ММ.ГГГГ:")
+        await CreateReportStates.waiting_date_manual.set()
+        
+
+@dp.message_handler(lambda message: re.match(r'\d{2}\.\d{2}\.\d{4}', message.text), state=CreateReportStates.waiting_date_manual)
+async def process_manual_date(message: types.Message, state: FSMContext):
+    # Проверка формата даты
+    try:
+        report_date = datetime.strptime(message.text, "%d.%m.%Y")
+    except ValueError:
+        await message.answer("Некорректный формат даты. Пожалуйста, используйте формат ДД.ММ.ГГГГ.")
+        return
+
+    # Сохранение даты в контексте состояния
+    async with state.proxy() as data:
+        data['report_date'] = report_date.strftime("%d.%m.%Y")
+
+
+    # Здесь вызовите функцию для выбора пациента
+    await select_patient_for_report(message)
+
+
+async def select_patient_for_report(message: types.Message):
+    patients_list = get_all_patients_from_database()
+
+    if not patients_list:
+        await message.answer("Список пациентов пуст.")
+        return
+
+    menu_text = "Выберите пациента для создания отчета:"
+    patients_buttons = [
+        types.InlineKeyboardButton(text=patient["fullname"], callback_data=f"report_patient_{patient['id']}")
+        for patient in patients_list
+    ]
+
+    patient_markup = types.InlineKeyboardMarkup(row_width=1)
+    patient_markup.add(*patients_buttons)
+
+    await message.answer(menu_text, reply_markup=patient_markup)
+    await CreateReportStates.waiting_for_patient_choice.set()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("report_patient_"), state=CreateReportStates.waiting_for_patient_choice)
 async def process_report_patient_buttons(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.answer()
     patient_id = int(callback_query.data.split("_")[-1])
     patient_data = get_patient_from_database(patient_id)
+
 
     if not patient_data:
         await callback_query.message.answer(
@@ -309,63 +428,30 @@ async def process_report_patient_buttons(callback_query: types.CallbackQuery, st
     folder_name = patient_data['fullname']
     parent_folder_id = get_folder_id_by_name(folder_name=folder_name)
 
-    if parent_folder_id is None:
-        await bot.send_message(chat_id=callback_query.from_user.id, text=f"Папка '{folder_name}' не найдена.")
-        return
-
-    # Переведите пользователя в состояние ожидания фотографии
-    await WaitForPhoto.waiting.set()
-
-    # Отправьте сообщение с инструкцией о загрузке фотографии
     full_username = get_user_full_name_from_database(user_id=callback_query.from_user.id)
 
-    # Сохраните информацию о папке и пользователях в контексте состояния
+    if not patient_data:
+        await callback_query.message.answer("Не удалось загрузить информацию о пациенте. Пожалуйста, попробуйте еще раз.")
+        return
+
     async with state.proxy() as data:
+        data['patient_id'] = patient_id
+        data['patient_fullname'] = patient_data['fullname']
         data['parent_folder_id'] = parent_folder_id
-        data['folder_name'] = folder_name
         data['full_username'] = full_username
 
-    menu_text = 'Пожалуйста, загрузите фото и нажмите кнопку *Готово*, когда закончите.'
 
+    # Переход к ожиданию фотографии
+    menu_text = 'Пожалуйста, загрузите фото и нажмите кнопку *Готово*, когда закончите.'
     ready_button = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     ready_button.add(types.KeyboardButton(text="Готово"))
+
     await bot.send_message(chat_id=callback_query.from_user.id, text=menu_text, reply_markup=ready_button)
-
-
-async def DateForFolderName(message: types.Message):
-    await message.answer("Выберите метод задания даты:", reply_markup=markup_date_choice)
-    
-
-
-@dp.message_handler(lambda message: message.text == "Ручной ввод даты", state="*")
-async def DateForFolderName_manual(message: types.Message, state: FSMContext):
-    await bot.send_message(chat_id=message.chat.id, text="Введите дату в формате DD.MM.YYYY")
-
-    current_time = message.text.strip()  # Получаем текст сообщения
-
-    async with state.proxy() as data:
-        data["current_time"] = current_time
-        data["status"] = True
-    
-    await state.finish()
-    await WaitForPhoto.waiting.set()
-
-@dp.callback_query_handler(lambda message: message.text == "Автоматическая дата", state="*")
-async def DateForFolderName_auto(callback_query: types.CallbackQuery, state: FSMContext):
-    async with state.proxy() as data:
-        data["status"] = False
-    
-    await state.finish()
-    await WaitForPhoto.waiting.set()
-
-    
+    await CreateReportStates.waiting_for_photo.set()
 
 
 
-
-
-
-@dp.message_handler(content_types=ContentType.ANY, state=WaitForPhoto.waiting)
+@dp.message_handler(content_types=ContentType.ANY, state=CreateReportStates.waiting_for_photo)
 async def handle_uploaded_photo(message: types.Message, state: FSMContext):
     # Определите, является ли фотография сжатой или оригинальной
 
@@ -387,15 +473,11 @@ async def handle_uploaded_photo(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         parent_folder_id = data['parent_folder_id']
         fullname = data['full_username']
-        status = data["status"]
+
+
         if 'new_folder_id' not in data:
             # Создать папку с текущим временем и дополнительными данными
-            if status:
-                current_time = data["current_time"]    
-            else:
-                current_time = datetime.now().strftime('%Y-%m-%d')
-
-            
+            current_time = data["report_date"]    
             new_folder_name = f'{current_time}_{fullname}'
 
             # Создать папку с новым именем в родительской папке
@@ -431,7 +513,5 @@ async def handle_stop_message(message: types.Message, state: FSMContext):
 
 
 if __name__ == '__main__':
-    from aiogram import executor
-
     create_users_table()
     executor.start_polling(dp, skip_updates=True)
